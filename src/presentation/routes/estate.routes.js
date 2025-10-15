@@ -4,6 +4,12 @@ const path = require('path');
 const fs = require('fs');
 
 const { excelExtractController } = require('../controllers/excel.controller');
+const {
+  getAllReportsController,
+  getAllReportsSimpleController,
+  getReportByIdController,
+  getBatchStatsController
+} = require('../controllers/getReports.controller'); 
 
 const router = express.Router();
 
@@ -25,6 +31,8 @@ const storage = multer.diskStorage({
   }
 });
 
+
+// Validate file types
 const fileFilter = (req, file, cb) => {
   const allowedExcelTypes = ['.xlsx', '.xls', '.csv'];
   const allowedPdfTypes = ['.pdf'];
@@ -57,5 +65,18 @@ router.post('/excel-extract',
   ]), 
   excelExtractController
 );
+
+// NEW ROUTES FOR GETTING REPORTS
+// GET /api/estate/reports - Get all reports with pagination and filtering
+router.get('/reports', getAllReportsController);
+
+// GET /api/estate/reports/all - Get all reports without pagination (simple)
+router.get('/reports/all', getAllReportsSimpleController);
+
+// GET /api/estate/reports/batch-stats - Get batch statistics
+router.get('/reports/batch-stats', getBatchStatsController);
+
+// GET /api/estate/reports/:id - Get specific report by ID
+router.get('/reports/:id', getReportByIdController);
 
 module.exports = router;

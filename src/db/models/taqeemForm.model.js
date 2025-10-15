@@ -15,6 +15,7 @@ const taqeemFormSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+
   // Excel data fields - using snake_case
   report_title: String,
   valuation_purpose: String,
@@ -27,6 +28,7 @@ const taqeemFormSchema = new mongoose.Schema({
   special_assumptions: String,
   final_value: String,
   valuation_currency: String,
+
   // This field now stores the matched PDF filepath
   report_asset_file: String,
   client_name: String,
@@ -68,6 +70,8 @@ const taqeemFormSchema = new mongoose.Schema({
   best_use: String,
   asset_age: String,
   street_width: String,  
+  form_id: String,
+  
   // Timestamp
   ts: {
     type: Date,

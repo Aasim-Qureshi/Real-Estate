@@ -6,6 +6,8 @@ const mongoose = require('mongoose');
 
 // Import routes
 const estateRoutes = require('./presentation/routes/estate.routes');
+const pythonWorker = require('./presentation/routes/pythonWorker.routes');
+const taqeemAuth = require('./presentation/routes/taqeemAuth.routes');
 
 const app = express();
 
@@ -20,8 +22,11 @@ app.use((req, res, next) => {
   next();
 });
 
-// Mount estate routes
+// Mount routes
 app.use('/api/estate', estateRoutes);
+app.use('/api/python', pythonWorker);
+app.use('/api/taqeemAuth', taqeemAuth);
+
 
 app.get('/health', (req, res) => {
   res.status(200).json({

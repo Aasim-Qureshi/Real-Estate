@@ -9,13 +9,15 @@ const TaqeemForm = require("../../db/models/taqeemForm.model")
  * @param {string} header - The header string to convert
  * @returns {string} Snake_case version
  */
+
 const toSnakeCase = (header) => {
   return header.replace(/([A-Z])/g, '_$1').toLowerCase();
 };
 
 /**
- * Transform data for database - only store matched PDF filepath in report_asset_file
+ * Transform data for database - store full PDF file path in report_asset_file
  */
+
 const transformDataForDatabase = (structuredData, batchId) => {
   return structuredData.map(record => {
     const transformedRecord = {
@@ -33,9 +35,10 @@ const transformDataForDatabase = (structuredData, batchId) => {
       }
     });
 
-    // Store only the matched PDF filepath in report_asset_file field
+    // Store the FULL PDF file path in report_asset_file field
     if (record.pdfFile && record.pdfFile.exists) {
-      transformedRecord.report_asset_file = record.pdfFile.storedPath;
+      // Store the complete absolute file path
+      transformedRecord.report_asset_file = path.resolve(record.pdfFile.storedPath);
     } else {
       // Keep original filename if no PDF matched, or set to empty
       transformedRecord.report_asset_file = record.report_asset_file || '';
@@ -93,7 +96,8 @@ const extractExcelData = async (file, pdfFiles = []) => {
     const pdfLookup = {};
     pdfFiles.forEach(pdfFile => {
       const originalName = pdfFile.originalname;
-      pdfLookup[originalName] = pdfFile.path; // Store only the filepath
+      // Store the full file path
+      pdfLookup[originalName] = path.resolve(pdfFile.path);
     });
 
     // Transform into structured data
@@ -127,6 +131,15 @@ const extractExcelData = async (file, pdfFiles = []) => {
     // Transform data for database
     const dataForDatabase = transformDataForDatabase(structuredData, batchId);
     console.log(`[extractExcelData] Transformed ${dataForDatabase.length} records for database`);
+    
+    // Log some sample file paths for verification
+    const sampleRecords = dataForDatabase.filter(record => record.report_asset_file);
+    if (sampleRecords.length > 0) {
+      console.log(`[extractExcelData] Sample PDF file paths stored:`);
+      sampleRecords.slice(0, 3).forEach((record, index) => {
+        console.log(`  ${index + 1}. ${record.report_asset_file}`);
+      });
+    }
 
     // Save to database
     const insertedRecords = await saveToDatabase(dataForDatabase);
@@ -149,6 +162,11 @@ const extractExcelData = async (file, pdfFiles = []) => {
           totalPdfs: pdfFiles.length,
           matchedPdfs: structuredData.filter(r => r.pdfFile.exists).length,
           unmatchedPdfs: structuredData.filter(r => !r.pdfFile.exists && r.pdfFile.expectedFileName).length
+        },
+        // Include file path info in response for debugging
+        filePathInfo: {
+          storageType: "full_absolute_paths",
+          samplePaths: sampleRecords.slice(0, 3).map(r => r.report_asset_file)
         }
       }
     };
