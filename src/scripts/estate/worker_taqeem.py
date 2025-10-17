@@ -54,9 +54,10 @@ async def process_batch_task(cmd):
     try:
         batch_id = cmd.get("batchId")
         report_ids = cmd.get("reportIds", [])
+        num_tabs = cmd.get("numTabs", 1)  # ADD THIS LINE
         socket_mode = cmd.get("socketMode", False)
         
-        print(f"[PY] Starting batch processing: {batch_id} with {len(report_ids)} reports", file=sys.stderr)
+        print(f"[PY] Starting batch processing: {batch_id} with {len(report_ids)} reports using {num_tabs} tabs", file=sys.stderr)
         
         # Get browser instance
         browser = await get_browser()
@@ -70,16 +71,17 @@ async def process_batch_task(cmd):
                 "type": "PROGRESS",
                 "batchId": batch_id,
                 "status": "STARTED",
-                "message": f"Starting processing for batch {batch_id}",
+                "message": f"Starting processing for batch {batch_id} with {num_tabs} tabs",
                 "current": 0,
                 "total": len(report_ids),
                 "percentage": 0,
+                "numTabs": num_tabs,  # ADD THIS
                 "timestamp": asyncio.get_event_loop().time()
             }
             print(json.dumps(progress_data), flush=True)
         
-        # Process the batch
-        result = await runFormFill(browser, batch_id, control_state)
+        # Process the batch - PASS num_tabs parameter
+        result = await runFormFill(browser, batch_id, control_state, num_tabs)  # ADD num_tabs
         
         # Add batchId to result
         result["batchId"] = batch_id
@@ -90,10 +92,11 @@ async def process_batch_task(cmd):
                 "type": "PROGRESS",
                 "batchId": batch_id,
                 "status": "COMPLETED",
-                "message": f"Batch {batch_id} processed successfully",
+                "message": f"Batch {batch_id} processed successfully using {num_tabs} tabs",
                 "current": len(report_ids),
                 "total": len(report_ids),
                 "percentage": 100,
+                "numTabs": num_tabs,  # ADD THIS
                 "timestamp": asyncio.get_event_loop().time(),
                 "failed_records": result.get("failed_records", 0)
             }
@@ -126,6 +129,7 @@ async def process_batch_task(cmd):
 async def handle_process_batch_command(cmd):
     """Handle batch processing command - starts task in background"""
     batch_id = cmd.get("batchId")
+    num_tabs = cmd.get("numTabs")
     
     # Create and store the task
     task = asyncio.create_task(process_batch_task(cmd))
@@ -136,6 +140,7 @@ async def handle_process_batch_command(cmd):
         "status": "ACKNOWLEDGED",
         "message": f"Batch {batch_id} processing started",
         "batchId": batch_id,
+        "numTabs": num_tabs,
         "commandId": cmd.get("commandId")
     }
     print(json.dumps(ack_response), flush=True)

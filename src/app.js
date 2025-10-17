@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const estateRoutes = require('./presentation/routes/estate.routes');
 const pythonWorker = require('./presentation/routes/pythonWorker.routes');
 const taqeemAuth = require('./presentation/routes/taqeemAuth.routes');
+const validateRoutes = require('./presentation/routes/validator.routes');
 
 const app = express();
 
@@ -26,6 +27,7 @@ app.use((req, res, next) => {
 app.use('/api/estate', estateRoutes);
 app.use('/api/python', pythonWorker);
 app.use('/api/taqeemAuth', taqeemAuth);
+app.use('/api/validate', validateRoutes);
 
 
 app.get('/health', (req, res) => {

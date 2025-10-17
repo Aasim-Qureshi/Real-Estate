@@ -2,7 +2,7 @@ const pythonWorkerService = require('../pythonWorkerService');
 
 module.exports = (socket, socketService) => {
   socket.on('start_taqeem_processing', async (data) => {
-    const { batchId, reportIds, actionType = 'process' } = data;
+    const { batchId, reportIds, numTabs = 1, actionType = 'process' } = data;
     
     try {
       // Validate required fields
@@ -10,9 +10,22 @@ module.exports = (socket, socketService) => {
         throw new Error('batchId is required');
       }
 
-      console.log(`[PROCESSING STARTED] Batch ${batchId}`);
+      // Validate numTabs
+      let validatedNumTabs = parseInt(numTabs);
+      if (isNaN(validatedNumTabs) || validatedNumTabs < 1) {
+        validatedNumTabs = 1;
+      } else if (validatedNumTabs > 10) {
+        validatedNumTabs = 10;
+      }
 
-      // Join the batch room so this socket receives updates
+      // Don't use more tabs than reports
+      if (validatedNumTabs > reportIds.length) {
+        validatedNumTabs = reportIds.length;
+      }
+
+      console.log(`[PROCESSING STARTED] Batch ${batchId} with ${reportIds.length} reports using ${validatedNumTabs} tabs`);
+
+      // Join the batch room
       socket.join(`batch_${batchId}`);
       
       // Store session
@@ -20,6 +33,7 @@ module.exports = (socket, socketService) => {
         socket,
         batchId,
         reportIds,
+        numTabs: validatedNumTabs,
         startedAt: new Date(),
         userId: socket.userId
       });
@@ -29,6 +43,7 @@ module.exports = (socket, socketService) => {
         batchId,
         status: 'STARTED',
         totalReports: reportIds.length,
+        numTabs: validatedNumTabs,
         timestamp: new Date().toISOString()
       });
 
@@ -37,21 +52,23 @@ module.exports = (socket, socketService) => {
         batchId,
         status: 'PROCESSING_STARTED',
         totalReports: reportIds.length,
+        numTabs: validatedNumTabs,
         timestamp: new Date().toISOString()
       });
 
-      console.log(`[PYTHON WORKER] Sending batch ${batchId} to Python worker for processing`);
+      console.log(`[PYTHON WORKER] Sending batch ${batchId} to Python worker with ${validatedNumTabs} tabs`);
 
-      // Start Python worker processing (this now returns immediately with ACKNOWLEDGED)
-      const response = await pythonWorkerService.processTaqeemBatch(batchId, reportIds, true);
+      // Start Python worker processing with multi-tab support
+      const response = await pythonWorkerService.processTaqeemBatch(
+        batchId, 
+        reportIds, 
+        validatedNumTabs, 
+        true
+      );
       
-      // Check if the task was acknowledged (started successfully)
       if (response.status === 'ACKNOWLEDGED') {
-        console.log(`[PROCESSING ACKNOWLEDGED] Batch ${batchId} processing started in background`);
-        // Don't send completion here - it will come via progress updates
-        // The actual completion/failure will be sent through the PROGRESS messages
+        console.log(`[PROCESSING ACKNOWLEDGED] Batch ${batchId} started with ${validatedNumTabs} tabs`);
       } else if (response.status === 'FAILED') {
-        // Only handle immediate failures (before task could start)
         throw new Error(response.error || 'Failed to start processing');
       }
 
@@ -151,6 +168,20 @@ module.exports = (socket, socketService) => {
         error: error.message,
         timestamp: new Date().toISOString()
       });
+    }
+  });
+
+  // New event to update tab count for running batch (optional)
+  socket.on('update_tab_count', async (data) => {
+    const { batchId, numTabs } = data;
+    
+    try {
+      socket.emit('error', {
+        message: 'Cannot update tab count for running batch. Please stop and restart with new tab count.',
+        batchId
+      });
+    } catch (error) {
+      console.error(`[SOCKET ERROR] update_tab_count:`, error);
     }
   });
 };

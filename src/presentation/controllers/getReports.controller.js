@@ -136,6 +136,9 @@ const getReportByIdController = async (req, res) => {
 /**
  * Get batch statistics
  */
+/**
+ * Get batch statistics with detailed report info
+ */
 const getBatchStatsController = async (req, res) => {
   try {
     const batchStats = await TaqeemForm.aggregate([
@@ -148,8 +151,8 @@ const getBatchStatsController = async (req, res) => {
               $cond: [
                 { 
                   $and: [
-                    { $ifNull: ['$form_id', false] }, // Returns false if null/undefined
-                    { $ne: ['$form_id', ''] } // Explicitly check for empty string
+                    { $ifNull: ['$form_id', false] },
+                    { $ne: ['$form_id', ''] }
                   ]
                 },
                 1,
@@ -158,7 +161,18 @@ const getBatchStatsController = async (req, res) => {
             }
           },
           latestUpload: { $max: '$ts' },
-          earliestUpload: { $min: '$ts' }
+          earliestUpload: { $min: '$ts' },
+          reportIds: { $push: '$_id' },
+          // Optional: Include additional report information
+          reports: {
+            $push: {
+              id: '$_id',
+              form_id: '$form_id',
+              report_asset_file: '$report_asset_file',
+              type: '$type',
+              ts: '$ts'
+            }
+          }
         }
       },
       {

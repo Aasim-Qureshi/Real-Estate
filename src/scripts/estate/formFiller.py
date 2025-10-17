@@ -4,9 +4,7 @@ import traceback
 import json
 import sys
 from datetime import datetime
-
 from motor.motor_asyncio import AsyncIOMotorClient
-
 from formSteps import form_steps
 
 MONGO_URI="mongodb+srv://test:JUL3OvyCSLVjSixj@assetval.pu3bqyr.mongodb.net/projectForever"
@@ -24,10 +22,6 @@ def emit_progress(status, message, batch_id, record_id=None, **kwargs):
         "timestamp": time.time(),
         **kwargs
     }
-    
-    # Auto-calculate percentage if current and total are provided
-    if 'current' in kwargs and 'total' in kwargs and kwargs['total'] > 0:
-        progress_data['percentage'] = round((kwargs['current'] / kwargs['total']) * 100, 2)
     
     print(json.dumps(progress_data), flush=True)
 
@@ -125,33 +119,12 @@ async def set_location(page, country_name, region_name, city_name):
 async def bulk_inject_inputs(page, record, field_map, field_types):
     jsdata = {}
     
-    # Debug: Log what fields we're attempting to fill
-    print(json.dumps({
-        "type": "DEBUG", 
-        "message": f"Processing {len(field_map)} fields from field_map"
-    }), flush=True)
-    
-    print(json.dumps({
-        "type": "DEBUG", 
-        "message": f"Record keys available: {list(record.keys())}"
-    }), flush=True)
-
     for key, selector in field_map.items():
         if key not in record:
-            print(json.dumps({
-                "type": "DEBUG", 
-                "message": f"Field '{key}' not in record - skipping"
-            }), flush=True)
             continue
 
         field_type = field_types.get(key, "text")
         value = str(record[key] or "").strip()
-        
-        # Log which fields we're preparing to inject
-        print(json.dumps({
-            "type": "DEBUG", 
-            "message": f"Preparing field '{key}' with selector '{selector}' and value '{value[:50]}...'"
-        }), flush=True)
 
         if field_type == "date" and value:
             try:
@@ -165,7 +138,6 @@ async def bulk_inject_inputs(page, record, field_map, field_types):
 
         jsdata[selector] = {"type": field_type, "value": value}
 
-    # Enhanced JavaScript with detailed logging
     js = f"""
     (function() {{
         const data = {json.dumps(jsdata)};
@@ -173,42 +145,31 @@ async def bulk_inject_inputs(page, record, field_map, field_types):
         let failCount = 0;
         const failures = [];
         
-        console.log('🔍 Starting bulk inject with', Object.keys(data).length, 'fields');
-        
         for (const [selector, meta] of Object.entries(data)) {{
-            console.log('📍 Attempting:', selector, '| Type:', meta.type, '| Value:', meta.value?.substring(0, 50));
-            
             const el = document.querySelector(selector);
             if (!el) {{
-                console.error('❌ Element NOT FOUND:', selector);
                 failures.push({{selector, reason: 'Element not found'}});
                 failCount++;
                 continue;
             }}
-            
-            console.log('✅ Found element:', el.tagName, '| Name:', el.name, '| Type:', el.type);
 
             try {{
                 switch(meta.type) {{
                     case "checkbox":
                         el.checked = Boolean(meta.value);
                         el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                        console.log('✓ Checkbox set:', el.checked);
                         break;
 
                     case "select":
                         let found = false;
-                        console.log('🔍 Select has', el.options.length, 'options');
                         for (const opt of el.options) {{
                             if (opt.value == meta.value || opt.text == meta.value) {{
                                 el.value = opt.value;
                                 found = true;
-                                console.log('✓ Select option matched:', opt.value, opt.text);
                                 break;
                             }}
                         }}
                         if (!found && el.options.length) {{
-                            console.warn('⚠️ No matching option found, setting to first option');
                             el.selectedIndex = 0;
                         }}
                         el.dispatchEvent(new Event("change", {{ bubbles: true }}));
@@ -223,38 +184,26 @@ async def bulk_inject_inputs(page, record, field_map, field_types):
                                 if (radio) {{
                                     radio.checked = true;
                                     radio.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                                    console.log('✓ Radio button set:', radio.id);
                                     radioFound = true;
                                     break;
                                 }}
                             }}
-                        }}
-                        if (!radioFound) {{
-                            console.warn('⚠️ Radio button not found for value:', meta.value);
                         }}
                         break;
 
                     case "date":
                     case "text":
                     default:
-                        const oldValue = el.value;
                         el.value = meta.value ?? "";
                         el.dispatchEvent(new Event("input", {{ bubbles: true }}));
                         el.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                        console.log('✓ Text/date set:', oldValue, '->', el.value);
                         break;
                 }}
                 successCount++;
             }} catch(err) {{
-                console.error('❌ Error setting value:', err.message);
                 failures.push({{selector, reason: err.message}});
                 failCount++;
             }}
-        }}
-        
-        console.log('📊 Bulk inject complete:', successCount, 'succeeded,', failCount, 'failed');
-        if (failures.length > 0) {{
-            console.error('❌ Failed fields:', failures);
         }}
         
         return {{successCount, failCount, failures}};
@@ -263,49 +212,91 @@ async def bulk_inject_inputs(page, record, field_map, field_types):
 
     try:
         result = await page.evaluate(js)
-        # Handle the case where result might be a list or None
-        if isinstance(result, dict):
+        if isinstance(result, dict) and result.get('failures'):
             print(json.dumps({
-                "type": "DEBUG", 
-                "message": f"Bulk inject result: {result.get('successCount', 0)} succeeded, {result.get('failCount', 0)} failed"
+                "type": "WARNING", 
+                "message": f"Failed to inject fields: {result['failures']}"
             }), flush=True)
-            
-            if result.get('failures'):
-                print(json.dumps({
-                    "type": "WARNING", 
-                    "message": f"Failed to inject fields: {result['failures']}"
-                }), flush=True)
-        else:
-            # If result is not a dictionary (might be None, list, etc.)
-            print(json.dumps({
-                "type": "DEBUG", 
-                "message": f"Bulk inject completed (non-dict result: {type(result)})"
-            }), flush=True)
-            
     except Exception as e:
         print(json.dumps({
             "type": "ERROR", 
             "message": f"JavaScript evaluation failed: {str(e)}"
         }), flush=True)
 
-async def fill_form(page, record, field_map, field_types, is_last_step=False, retries=0, max_retries=2, skip_special_fields=False, control_state=None, batch_id=None, record_id=None):
+class ProgressTracker:
+    """Track progress focusing only on main tab"""
+    
+    def __init__(self, total_records, num_tabs, total_steps=len(form_steps)):
+        self.total_records = total_records
+        self.num_tabs = num_tabs
+        self.total_steps = total_steps
+        
+        # Weight steps by estimated time
+        self.step_weights = {
+            1: 0.15,  # Step 1: 15%
+            2: 0.20,  # Step 2: 20%
+            3: 0.25,  # Step 3: 25%
+            4: 0.30,  # Step 4: 25%
+            5: 0.10   # Step 5: 5% (save step)
+        }
+        
+        # Normalize weights
+        total_weight = sum(self.step_weights.values())
+        if total_weight != 1.0:
+            for step in self.step_weights:
+                self.step_weights[step] /= total_weight
+        
+        self.completed_records = 0
+        self.main_tab_progress = {}  # Track only main tab progress
+    
+    def get_overall_percentage(self, tab_id, current_step, record_index, total_in_tab, is_main_tab=False):
+        """Calculate overall percentage - focus on main tab progress"""
+        if not is_main_tab:
+            # For non-main tabs, just return base progress
+            return (self.completed_records / self.total_records) * 100
+        
+        # For main tab, calculate detailed progress
+        base_percentage = (self.completed_records / self.total_records) * 100
+        
+        # Current record progress within current step
+        step_progress = 0
+        if current_step <= self.total_steps:
+            step_weight = self.step_weights.get(current_step, 0.2)
+            step_progress = (record_index / total_in_tab) * step_weight * 100
+        
+        # Add progress for completed steps
+        current_step_progress = 0
+        for step in range(1, current_step):
+            current_step_progress += self.step_weights.get(step, 0.2) * 100
+        
+        total_percentage = base_percentage + current_step_progress + step_progress
+        
+        # Cap at 99% until truly complete
+        return min(99.0, total_percentage)
+    
+    def record_completed(self):
+        """Mark a record as completed"""
+        self.completed_records += 1
+    
+    def update_main_tab_progress(self, step, record_index, total_in_tab):
+        """Update progress for main tab only"""
+        self.main_tab_progress = {
+            'step': step,
+            'record_index': record_index,
+            'total_in_tab': total_in_tab,
+            'percentage': self.get_overall_percentage(1, step, record_index, total_in_tab, is_main_tab=True)
+        }
+
+async def fill_form(page, record, field_map, field_types, is_last_step=False, retries=0, max_retries=2, skip_special_fields=False, control_state=None, batch_id=None, record_id=None, tab_id=None, progress_tracker=None, step_num=None):
     try:
-        # Check for pause/stop
         if control_state:
             from worker_taqeem import check_control
             await check_control(control_state)
         
-        start_time = time.time()
-        
-        # PHASE 1: Handle asset_type FIRST (if present)
+        # PHASE 1: Handle asset_type FIRST
         if "asset_type" in field_map and "asset_type" in record:
             selector = field_map["asset_type"]
             value = str(record["asset_type"] or "")
-            
-            print(json.dumps({
-                "type": "DEBUG", 
-                "message": f"PHASE 1: Setting asset_type with value '{value}'"
-            }), flush=True)
             
             select_element = await wait_for_element(page, selector, timeout=10)
             if select_element:
@@ -314,38 +305,23 @@ async def fill_form(page, record, field_map, field_types, is_last_step=False, re
                     option_attrs = option.attrs
                     option_value = option_attrs.get("value")
                     if option_value == value:
-                        print(json.dumps({
-                            "type": "DEBUG", 
-                            "message": f"Found match for asset_type: {value}"
-                        }), flush=True)
                         await option.select_option()
                         break
         
-        # PHASE 2: Bulk inject all fields EXCEPT dynamic_select fields
+        # PHASE 2: Bulk inject standard fields
         bulk_field_map = {}
         bulk_field_types = {}
         
         for key, selector in field_map.items():
             field_type = field_types.get(key, "text")
-            # Exclude all dynamic_select, location, and file fields from bulk injection
             if field_type not in ["dynamic_select", "location", "file"]:
                 bulk_field_map[key] = selector
                 bulk_field_types[key] = field_type
         
-        print(json.dumps({
-            "type": "DEBUG", 
-            "message": f"PHASE 2: Bulk injecting {len(bulk_field_map)} standard fields"
-        }), flush=True)
-        
         await bulk_inject_inputs(page, record, bulk_field_map, bulk_field_types)
         await asyncio.sleep(1)
         
-        # PHASE 3: Handle other special fields (location, file) but NOT asset_usage_sector yet
-        print(json.dumps({
-            "type": "DEBUG", 
-            "message": "PHASE 3: Processing location and file fields"
-        }), flush=True)
-        
+        # PHASE 3: Handle special fields
         for key, selector in field_map.items():
             if key not in record:
                 continue
@@ -368,23 +344,13 @@ async def fill_form(page, record, field_map, field_types, is_last_step=False, re
                         await asyncio.sleep(1)
 
             except Exception as e:
-                print(json.dumps({
-                    "type": "DEBUG", 
-                    "message": f"Error handling special field {key}: {str(e)}"
-                }), flush=True)
                 continue
         
-        # PHASE 4: Handle asset_usage_sector LAST (if present and not asset_type)
+        # PHASE 4: Handle asset_usage_sector LAST
         if "asset_usage_sector" in field_map and "asset_usage_sector" in record:
             selector = field_map["asset_usage_sector"]
             value = str(record["asset_usage_sector"] or "")
             
-            print(json.dumps({
-                "type": "DEBUG", 
-                "message": f"PHASE 4: Setting asset_usage_sector with value '{value}'"
-            }), flush=True)
-            
-            # Wait extra time to ensure asset_type has fully loaded dependencies            
             select_element = await wait_for_element(page, selector, timeout=10)
             if select_element:
                 options = select_element.children
@@ -392,65 +358,30 @@ async def fill_form(page, record, field_map, field_types, is_last_step=False, re
                     option_attrs = option.attrs
                     option_value = option_attrs.get("value")
                     if option_value == value:
-                        print(json.dumps({
-                            "type": "DEBUG", 
-                            "message": f"Found match for asset_usage_sector: {value}"
-                        }), flush=True)
                         await option.select_option()
                         break
-                else:
-                    print(json.dumps({
-                        "type": "WARNING", 
-                        "message": f"No match found for asset_usage_sector value: {value}"
-                    }), flush=True)
-            else:
-                print(json.dumps({
-                    "type": "WARNING", 
-                    "message": f"asset_usage_sector selector not found: {selector}"
-                }), flush=True)
 
-        end_time = time.time()
-
-        # Continue button logic (unchanged)
+        # Continue/Save button logic
         if not is_last_step:
             continue_btn = await wait_for_element(page, "input[name='continue']", timeout=10)
             if continue_btn:
-                print(json.dumps({
-                    "type": "DEBUG", 
-                    "message": "Clicking continue button..."
-                }), flush=True)
-                
                 await asyncio.sleep(0.5)
                 await continue_btn.click()
                 await asyncio.sleep(2)
 
                 error_div = await wait_for_element(page, "div.alert.alert-danger", timeout=5)
                 if error_div:
-                    print(json.dumps({
-                        "type": "DEBUG", 
-                        "message": "Validation error found: retrying step"
-                    }), flush=True)
-                    
                     if retries < max_retries:
                         await asyncio.sleep(1)
-                        return await fill_form(page, record, field_map, field_types, is_last_step, retries + 1, max_retries, skip_special_fields, control_state, batch_id, record_id)
+                        return await fill_form(page, record, field_map, field_types, is_last_step, retries + 1, max_retries, skip_special_fields, control_state, batch_id, record_id, tab_id, progress_tracker, step_num)
                     else:
                         return {"status": "FAILED", "error": "Validation error found"}
                 
                 await wait_for_element(page, "input", timeout=10)
                 return True
             else:
-                print(json.dumps({
-                    "type": "DEBUG", 
-                    "message": "No continue button found - may be on final step"
-                }), flush=True)
                 return False
         else:
-            print(json.dumps({
-                "type": "DEBUG", 
-                "message": "Last step completed - clicking save button"
-            }), flush=True)
-            
             save_btn = await wait_for_element(page, "input[type='submit'], input[name='save']", timeout=10)
             if save_btn:
                 await asyncio.sleep(0.5)
@@ -458,154 +389,276 @@ async def fill_form(page, record, field_map, field_types, is_last_step=False, re
                 await asyncio.sleep(5)
                 
                 current_url = await page.evaluate("window.location.href")
-                print(json.dumps({
-                    "type": "DEBUG", 
-                    "message": f"Current URL: {current_url}"
-                }), flush=True)
-                
                 form_id = current_url.rstrip("/").split("/")[-1]
-                print(json.dumps({
-                    "type": "DEBUG", 
-                    "message": f"Extracted form id: {form_id}"
-                }), flush=True)
 
                 if form_id:
                     await db.taqeemForms.update_one(
                         {"_id": record["_id"]},
                         {"$set": {"form_id": form_id}}
                     )
-
-                    print(json.dumps({
-                        "type": "DEBUG", 
-                        "message": f"Updated record {record['_id']} with form id {form_id}"
-                    }), flush=True)
                     
-                    # Emit success progress
                     if batch_id and record_id:
-                        emit_progress("RECORD_SUCCESS", f"Record {record_id} processed successfully", batch_id, record_id=record_id, form_id=form_id)
+                        emit_progress("RECORD_SUCCESS", f"Record {record_id} processed successfully", batch_id, record_id=record_id, form_id=form_id, tab_id=tab_id)
                 
                 return {"status": "SAVED", "form_id": form_id}
             else:
                 return {"status": "FAILED", "error": "Save button not found"}
             
     except Exception as e:
-        print(json.dumps({
-            "type": "ERROR", 
-            "message": f"Error filling form: {e}"
-        }), flush=True)
         return {"status": "FAILED", "error": str(e)}
 
-async def runFormFill(browser, batch_id, control_state=None):
+async def process_records_in_tab(page, records, batch_id, control_state, tab_id, total_records, progress_tracker, is_main_tab=False):
+    """Process a subset of records in a single tab"""
+    failed_count = 0
+    success_count = 0
+    total_in_tab = len(records)
+    
     try:
-        emit_progress("FETCHING_DATA", f"Fetching records for batch {batch_id}", batch_id)
+        # Only emit TAB_STARTED for main tab
+        if is_main_tab:
+            emit_progress("TAB_STARTED", f"Main tab started processing {total_in_tab} records", 
+                         batch_id, tab_id=tab_id, is_main_tab=True, total=total_records, current=0)
         
-        cursor_upper = db.taqeemForms.find({"batch_id": batch_id})
-        
-        records_upper = await cursor_upper.to_list(length=None)
-        
-        # Choose the collection that has records
-        if records_upper:
-            records = records_upper
-            collection_name = "taqeemForms"
-        else:
-            emit_progress("NO_RECORDS", f"No records found for batch {batch_id}", batch_id)
-            return {"status": "FAILED", "error": f"No records for batchId={batch_id}"}
-
-        total_records = len(records)
-        emit_progress("DATA_FETCHED", f"Found {total_records} records in {collection_name}", batch_id, 
-                     total=total_records, current=0, percentage=0)
-
-        # Navigate to the form URL using the browser
-        emit_progress("NAVIGATING", "Navigating to form page", batch_id, 
-                     total=total_records, current=0, percentage=0)
-        page = browser.main_tab
-        await page.get("https://qima.taqeem.sa/report/create/1/137")
-        await asyncio.sleep(2)
-        
-        # Verify we're on the correct page
-        current_url = await page.evaluate("window.location.href")
-        emit_progress("PAGE_LOADED", f"Loaded page: {current_url}", batch_id, 
-                     total=total_records, current=0, percentage=0)
-
-        failed_count = 0
-        success_count = 0
-        
-        for index, record in enumerate(records):
+        for local_index, record in enumerate(records):
             record_id = str(record["_id"])
             
-            # Check for pause/stop
             if control_state:
                 from worker_taqeem import check_control
                 await check_control(control_state)
             
             # Skip if already processed
             if record.get("form_id"):
-                emit_progress("RECORD_SKIPPED", f"Record {record_id} already processed", batch_id, 
-                            record_id=record_id, current=index + 1, total=total_records)
+                if is_main_tab:
+                    emit_progress("RECORD_SKIPPED", f"Record {local_index + 1}/{total_in_tab} already processed", batch_id, 
+                                record_id=record_id)
                 success_count += 1
+                progress_tracker.record_completed()
                 continue
 
-            current_progress = index + 1
-            percentage = round((current_progress / total_records) * 99, 2)
-            
-            emit_progress("RECORD_STARTED", f"Processing record {current_progress}/{total_records}", batch_id, 
-                         record_id=record_id, current=current_progress, total=total_records, percentage=percentage)
-
-            # For subsequent records after the first one, navigate to the form start
-            if index > 0:
-                emit_progress("NAVIGATING", f"Navigating to form for record {current_progress}", batch_id, 
-                            record_id=record_id, current=current_progress, total=total_records, percentage=percentage)
-                await page.get("https://qima.taqeem.sa/report/create/1/137")
-
-            record_failed = False
-            for step_num, step_config in enumerate(form_steps, 1):
-                is_last_step = (step_num == len(form_steps))
+            # Only emit detailed progress for main tab
+            if is_main_tab:
+                progress_tracker.update_main_tab_progress(1, local_index, total_in_tab)
+                current_percentage = progress_tracker.get_overall_percentage(tab_id, 1, local_index, total_in_tab, is_main_tab=True)
                 
-                emit_progress("STEP_STARTED", f"Starting step {step_num}/{len(form_steps)}", batch_id,
-                            record_id=record_id, step=step_num, total_steps=len(form_steps),
-                            current=current_progress, total=total_records, percentage=percentage)
+                emit_progress("RECORD_STARTED", f"Starting record {local_index + 1}/{total_in_tab}", 
+                             batch_id, record_id=record_id, 
+                             current=progress_tracker.completed_records, total=total_records)
 
-                result = await fill_form(
-                    page, 
-                    record, 
-                    step_config["field_map"], 
-                    step_config["field_types"], 
-                    is_last_step, 
-                    skip_special_fields=True,
-                    control_state=control_state, 
-                    batch_id=batch_id, 
-                    record_id=record_id
+            try:
+                # Navigate to form
+                await page.get("https://qima.taqeem.sa/report/create/1/137")
+                await asyncio.sleep(2)
+
+                record_failed = False
+                for step_num, step_config in enumerate(form_steps, 1):
+                    is_last_step = (step_num == len(form_steps))
+                    
+                    # Only update progress for main tab
+                    if is_main_tab:
+                        progress_tracker.update_main_tab_progress(step_num, local_index, total_in_tab)
+                        current_percentage = progress_tracker.get_overall_percentage(tab_id, step_num, local_index, total_in_tab, is_main_tab=True)
+                        
+                        step_message = f"Record {local_index + 1}/{total_in_tab}, Step {step_num}/{len(form_steps)}"
+                        emit_progress("STEP_PROGRESS", step_message, batch_id,
+                                    record_id=record_id, step=step_num,
+                                    current=progress_tracker.completed_records, total=total_records)
+                    
+                    result = await fill_form(
+                        page, 
+                        record, 
+                        step_config["field_map"], 
+                        step_config["field_types"], 
+                        is_last_step, 
+                        skip_special_fields=True,
+                        control_state=control_state, 
+                        batch_id=batch_id, 
+                        record_id=record_id,
+                        tab_id=tab_id,
+                        progress_tracker=progress_tracker,
+                        step_num=step_num
+                    )
+
+                    if isinstance(result, dict) and result.get("status") == "FAILED":
+                        record_failed = True
+                        failed_count += 1
+                        if is_main_tab:
+                            emit_progress("STEP_FAILED", f"Step {step_num} failed", batch_id,
+                                        record_id=record_id, step=step_num, error=result.get("error"))
+                        break
+
+                if not record_failed:
+                    success_count += 1
+                    if is_main_tab:
+                        emit_progress("RECORD_COMPLETED", f"Record {local_index + 1} completed", batch_id,
+                                    record_id=record_id)
+                
+                # Update progress tracker
+                progress_tracker.record_completed()
+                if is_main_tab:
+                    progress_tracker.update_main_tab_progress(len(form_steps) + 1, local_index + 1, total_in_tab)
+                    
+                    # Emit progress after record completion
+                    current_percentage = progress_tracker.get_overall_percentage(tab_id, len(form_steps) + 1, local_index + 1, total_in_tab, is_main_tab=True)
+                    emit_progress("PROCESSING", f"Completed {local_index + 1}/{total_in_tab}",
+                                batch_id, current=progress_tracker.completed_records, total=total_records)
+            
+            except Exception as e:
+                failed_count += 1
+                progress_tracker.record_completed()
+                
+                if is_main_tab:
+                    emit_progress("RECORD_FAILED", f"Record {local_index + 1} failed - {str(e)}", 
+                                batch_id, record_id=record_id, error=str(e))
+                    
+                    emit_progress("PROCESSING", f"Continuing after failure", 
+                                batch_id, current=progress_tracker.completed_records, total=total_records)
+
+        if is_main_tab:
+            emit_progress("TAB_COMPLETED", f"Main tab finished: {success_count} successful, {failed_count} failed", 
+                         batch_id, success_count=success_count, failed_count=failed_count)
+        
+        return {"success": success_count, "failed": failed_count}
+        
+    except Exception as e:
+        if is_main_tab:
+            emit_progress("TAB_FAILED", f"Main tab failed: {str(e)}", batch_id, error=str(e))
+        return {"success": success_count, "failed": failed_count}
+
+def distribute_records(records, num_tabs):
+    """Distribute records as evenly as possible across tabs"""
+    total = len(records)
+    base_count = total // num_tabs
+    remainder = total % num_tabs
+    
+    distributed = []
+    start_idx = 0
+    
+    for i in range(num_tabs):
+        # First 'remainder' tabs get one extra record
+        count = base_count + (1 if i < remainder else 0)
+        end_idx = start_idx + count
+        distributed.append(records[start_idx:end_idx])
+        start_idx = end_idx
+    
+    return distributed
+
+async def runFormFill(browser, batch_id, control_state=None, num_tabs=1):
+    try:
+        emit_progress("INITIALIZING", f"Initializing batch processing with {num_tabs} tabs", batch_id)
+        
+        cursor_upper = db.taqeemForms.find({"batch_id": batch_id})
+        records = await cursor_upper.to_list(length=None)
+        
+        if not records:
+            emit_progress("NO_RECORDS", f"No records found for batch {batch_id}", batch_id)
+            return {"status": "FAILED", "error": f"No records for batchId={batch_id}"}
+
+        total_records = len(records)
+        
+        # Ensure we don't use more tabs than records
+        actual_tabs = min(num_tabs, total_records)
+        
+        # Initialize progress tracker
+        progress_tracker = ProgressTracker(total_records, actual_tabs)
+        
+        emit_progress("DATA_FETCHED", f"Found {total_records} records, distributing across {actual_tabs} tabs", 
+                     batch_id, total=total_records, num_tabs=actual_tabs, current=0)
+
+        # Distribute records across tabs
+        distributed_records = distribute_records(records, actual_tabs)
+        
+        # Log distribution
+        for i, tab_records in enumerate(distributed_records):
+            print(f"Tab {i+1}: {len(tab_records)} records", file=sys.stderr)
+
+        # Get main tab
+        main_tab = browser.main_tab
+        
+        if not main_tab:
+            emit_progress("ERROR", "No browser tab available", batch_id)
+            return {"status": "FAILED", "error": "No browser tab available"}
+        
+        # Navigate main tab to form
+        await main_tab.get("https://qima.taqeem.sa/report/create/1/137")
+        await asyncio.sleep(2)
+        
+        # Process records in parallel using multiple tabs
+        tasks = []
+        pages_to_close = []
+        
+        for tab_id, tab_records in enumerate(distributed_records, 1):
+            if not tab_records:  # Skip if no records
+                continue
+                
+            if tab_id == 1:
+                # Use main tab for first batch
+                task = process_records_in_tab(
+                    main_tab, 
+                    tab_records, 
+                    batch_id, 
+                    control_state, 
+                    tab_id,
+                    total_records,
+                    progress_tracker,
+                    is_main_tab=True
                 )
+            else:
+                # Create new tabs for remaining batches
+                new_tab = await browser.get("https://qima.taqeem.sa/report/create/1/137", new_tab=True)
+                await asyncio.sleep(2)
+                pages_to_close.append(new_tab)
+                
+                task = process_records_in_tab(
+                    new_tab, 
+                    tab_records, 
+                    batch_id, 
+                    control_state, 
+                    tab_id,
+                    total_records,
+                    progress_tracker,
+                    is_main_tab=False
+                )
+            
+            tasks.append(task)
 
-                if isinstance(result, dict) and result.get("status") == "FAILED":
-                    record_failed = True
-                    failed_count += 1
-                    emit_progress("STEP_FAILED", f"Step {step_num} failed", batch_id,
-                                record_id=record_id, step=step_num, error=result.get("error"),
-                                current=current_progress, total=total_records, percentage=percentage)
-                    break
-                else:
-                    emit_progress("STEP_COMPLETED", f"Completed step {step_num}/{len(form_steps)}", batch_id,
-                                record_id=record_id, step=step_num, total_steps=len(form_steps),
-                                current=current_progress, total=total_records, percentage=percentage)
+        # Wait for all tabs to complete
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Close additional tabs (but not main tab)
+        for page in pages_to_close:
+            try:
+                await page.close()
+            except Exception as e:
+                print(f"Error closing tab: {e}", file=sys.stderr)
+        
+        # Aggregate results
+        total_success = 0
+        total_failed = 0
+        
+        for result in results:
+            if isinstance(result, dict):
+                total_success += result.get("success", 0)
+                total_failed += result.get("failed", 0)
+            elif isinstance(result, Exception):
+                print(f"Tab error: {result}", file=sys.stderr)
+                total_failed += 1
 
-            if not record_failed:
-                success_count += 1
-                emit_progress("RECORD_COMPLETED", f"Record {current_progress} completed successfully", batch_id,
-                            record_id=record_id, current=current_progress, total=total_records, percentage=percentage)
-
-        # Final progress update with 100% completion
-        emit_progress("BATCH_COMPLETED", f"Batch processing completed: {success_count} successful, {failed_count} failed", 
-                     batch_id, success_count=success_count, failed_count=failed_count, 
-                     total=total_records, current=total_records, percentage=100)
+        # Final completion emit
+        emit_progress("COMPLETED", 
+                     f"Batch processing complete: {total_success} successful, {total_failed} failed across {actual_tabs} tabs", 
+                     batch_id, 
+                     success_count=total_success, 
+                     failed_count=total_failed, 
+                     total=total_records, 
+                     current=total_records)
 
         return {
             "status": "SUCCESS", 
             "batchId": batch_id, 
-            "successful_records": success_count,
-            "failed_records": failed_count,
+            "successful_records": total_success,
+            "failed_records": total_failed,
             "total_records": total_records,
-            "collection_used": collection_name
+            "tabs_used": actual_tabs
         }
 
     except Exception as e:
